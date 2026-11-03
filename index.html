@@ -9,20 +9,24 @@
 
 <style>
 *{box-sizing:border-box}
+
 body{
   margin:0;
   background:#071b35;
   color:white;
   font-family:Arial,sans-serif;
-  padding:18px;
+  padding:16px;
 }
+
 h1{text-align:center;color:#55d6ff}
+
 .card{
   background:#122b49;
   padding:16px;
   border-radius:14px;
   margin:14px 0;
 }
+
 button{
   background:#168bd0;
   color:white;
@@ -32,30 +36,66 @@ button{
   margin:4px;
   font-size:15px;
 }
+
 button:disabled{opacity:.5}
+
 video{
+  display:block;
   width:100%;
   background:#000;
   border-radius:10px;
 }
+
+.video-wrap{
+  position:relative;
+  width:100%;
+}
+
+#overlay{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  pointer-events:none;
+}
+
 .time{
   font-size:25px;
   color:#55d6ff;
   font-weight:bold;
 }
+
 .small{font-size:13px;color:#b8cce0}
-.row{display:flex;flex-wrap:wrap;gap:6px}
+
+.row{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+}
+
 #frames{
   display:grid;
   grid-template-columns:repeat(2,1fr);
   gap:8px;
 }
+
 .frame{
   background:#071b35;
   padding:6px;
   border-radius:8px;
 }
-.frame img{width:100%;border-radius:5px}
+
+.frame img{
+  width:100%;
+  border-radius:5px;
+}
+
+#playerResults button{
+  display:block;
+  width:100%;
+  text-align:left;
+}
+
 </style>
 </head>
 
@@ -66,14 +106,56 @@ video{
 <div class="card">
 <h3>① 動画を選択</h3>
 <input id="file" type="file" accept="video/*">
+<p id="fileStatus" class="small">動画を選択してください。</p>
 </div>
 
 <div class="card">
 <h3>② 動画を確認</h3>
-<video id="video" controls playsinline preload="auto"></video>
+
+<div class="video-wrap">
+  <video id="video" controls playsinline preload="auto"></video>
+  <canvas id="overlay"></canvas>
+</div>
+
+<div class="row">
+<button id="backFrame">◀ 1コマ戻る</button>
+<button id="nextFrame">1コマ進む ▶</button>
+</div>
+
+<p>
+現在時刻：
+<span id="current" class="time">0.000</span> 秒
+</p>
+</div>
 
 <div class="card">
-<h3>⑤ AI選手検出</h3>
+<h3>③ スタート・タッチを記録</h3>
+
+<button id="markStart">スタートを記録</button>
+<button id="markFinish">タッチを記録</button>
+
+<p>スタート：<span id="start">未設定</span></p>
+<p>タッチ：<span id="finish">未設定</span></p>
+
+<button id="calculate">タイムを計算</button>
+<p class="time" id="result">--.---</p>
+</div>
+
+<div class="card">
+<h3>④ 動画から画像を取り出す</h3>
+
+<p class="small">
+0.5秒ごとの画像を最大80枚、端末内で取り出します。
+</p>
+
+<button id="extract">画像を取り出す</button>
+
+<p id="status" class="small">動画を選択してください。</p>
+<div id="frames"></div>
+</div>
+
+<div class="card">
+<h3>⑤ AI選手検出・追跡</h3>
 
 <p id="aiStatus" class="small">
 AIモデルの準備ができていません。
@@ -82,351 +164,389 @@ AIモデルの準備ができていません。
 <button id="loadAI">AIモデルを読み込む</button>
 <button id="detectPlayers" disabled>選手を検出する</button>
 
-<div id="playerResults"></div>
-</div>  
-
-<div class="row">
-<button onclick="step(-1)">◀ 1コマ戻る</button>
-<button onclick="step(1)">1コマ進む ▶</button>
-</div>
-
-<p>現在時刻：
-<span id="current" class="time">0.000</span> 秒
-</p>
-</div>
-
-<div class="card">
-<h3>③ スタート・タッチを記録</h3>
-
-<button onclick="mark('start')">スタートを記録</button>
-<button onclick="mark('finish')">タッチを記録</button>
-
-<p>スタート：<span id="start">未設定</span></p>
-<p>タッチ：<span id="finish">未設定</span></p>
-
-<button onclick="calculate()">タイムを計算</button>
-<p class="time" id="result">--.---</p>
-</div>
-
-<div class="card">
-<h3>④ 動画から画像を取り出す</h3>
-
 <p class="small">
-0.5秒ごとの画像をiPhone内で取り出します。
-動画は外部に送信しません。
+動画を一時停止して選手を検出し、計測対象を選んでください。
+再生すると追跡を開始します。
 </p>
 
-<button id="extract" onclick="extractFrames()">
-画像を取り出す
-</button>
-
-<p id="status" class="small">動画を選択してください。</p>
-<div id="frames"></div>
+<div id="playerResults"></div>
 </div>
-  
+
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3"></script>
 
 <script>
 
-const video=document.getElementById('video');
+// ========================
+// 基本設定
+// ========================
 
-let startTime=null;
-let finishTime=null;
-let videoUrl=null;
-let frameRate=30;
+const video = document.getElementById('video');
+const fileInput = document.getElementById('file');
+const overlay = document.getElementById('overlay');
+const ctx = overlay.getContext('2d');
 
-const fileInput=document.getElementById('file');
-const frames=document.getElementById('frames');
-const status=document.getElementById('status');
-const button=document.getElementById('extract');
+const frames = document.getElementById('frames');
 
-fileInput.addEventListener('change',e=>{
+const aiStatus = document.getElementById('aiStatus');
+const loadAIButton = document.getElementById('loadAI');
+const detectButton = document.getElementById('detectPlayers');
+const playerResults = document.getElementById('playerResults');
 
-  const file=e.target.files[0];
-  if(!file)return;
+const status = document.getElementById('status');
 
-  if(videoUrl){
+let videoUrl = null;
+let frameRate = 30;
+
+let startTime = null;
+let finishTime = null;
+
+let aiModel = null;
+let selectedPlayer = null;
+let previousCenter = null;
+
+let trackingActive = false;
+let trackingTimer = null;
+let detecting = false;
+
+let lostCount = 0;
+let lastPredictions = [];
+
+
+// ========================
+// 動画読み込み
+// ========================
+
+fileInput.addEventListener('change', event => {
+
+  const file = event.target.files[0];
+
+  if (!file) return;
+
+  stopTracking();
+
+  if (videoUrl) {
     URL.revokeObjectURL(videoUrl);
   }
 
-  videoUrl=URL.createObjectURL(file);
+  videoUrl = URL.createObjectURL(file);
 
-  video.src=videoUrl;
+  video.src = videoUrl;
   video.load();
 
-  startTime=null;
-  finishTime=null;
+  startTime = null;
+  finishTime = null;
 
-  document.getElementById('start').textContent='未設定';
-  document.getElementById('finish').textContent='未設定';
-  document.getElementById('result').textContent='--.---';
+  selectedPlayer = null;
+  previousCenter = null;
 
-  frames.innerHTML='';
-  status.textContent='動画を読み込んでいます...';
+  playerResults.innerHTML = '';
+  clearOverlay();
 
-  video.addEventListener('loadedmetadata',()=>{
-    status.textContent='動画を読み込みました。';
-    update();
-  },{once:true});
+  document.getElementById('start').textContent = '未設定';
+  document.getElementById('finish').textContent = '未設定';
+  document.getElementById('result').textContent = '--.---';
 
-  video.addEventListener('error',()=>{
-    status.textContent='動画の読み込みに失敗しました。';
-  },{once:true});
+  document.getElementById('fileStatus').textContent =
+    '動画を読み込んでいます...';
+
+  status.textContent = '動画を読み込んでいます...';
+
+  video.addEventListener('loadedmetadata', () => {
+
+    document.getElementById('fileStatus').textContent =
+      '動画を読み込みました。';
+
+    status.textContent = '動画を読み込みました。';
+
+    updateTime();
+
+    resizeOverlay();
+
+  }, {once:true});
+
+  video.addEventListener('error', () => {
+
+    document.getElementById('fileStatus').textContent =
+      '動画の読み込みに失敗しました。';
+
+  }, {once:true});
 
 });
 
-function update(){
-  document.getElementById('current').textContent=
+
+// ========================
+// 時刻表示・コマ送り
+// ========================
+
+function updateTime(){
+
+  document.getElementById('current').textContent =
     video.currentTime.toFixed(3);
+
 }
 
-video.addEventListener('timeupdate',update);
-video.addEventListener('seeked',update);
+video.addEventListener('timeupdate', updateTime);
+video.addEventListener('seeked', updateTime);
+
+document.getElementById('backFrame').addEventListener('click', () => {
+  step(-1);
+});
+
+document.getElementById('nextFrame').addEventListener('click', () => {
+  step(1);
+});
 
 function step(direction){
 
-  if(!video.src)return;
+  if (!video.src) return;
 
   video.pause();
 
-  video.currentTime=Math.max(
+  video.currentTime = Math.max(
     0,
     Math.min(
-      video.duration||0,
-      video.currentTime+direction/frameRate
+      video.duration || 0,
+      video.currentTime + direction / frameRate
     )
   );
+
 }
+
+
+// ========================
+// 手動タイム計測
+// ========================
+
+document.getElementById('markStart').addEventListener('click', () => {
+  mark('start');
+});
+
+document.getElementById('markFinish').addEventListener('click', () => {
+  mark('finish');
+});
 
 function mark(type){
 
-  if(!video.src){
+  if (!video.src) {
     alert('先に動画を選んでください');
     return;
   }
 
-  if(type==='start'){
-    startTime=video.currentTime;
-    document.getElementById('start').textContent=
-      startTime.toFixed(3)+' 秒';
-  }else{
-    finishTime=video.currentTime;
-    document.getElementById('finish').textContent=
-      finishTime.toFixed(3)+' 秒';
+  if (type === 'start') {
+
+    startTime = video.currentTime;
+
+    document.getElementById('start').textContent =
+      startTime.toFixed(3) + ' 秒';
+
+  } else {
+
+    finishTime = video.currentTime;
+
+    document.getElementById('finish').textContent =
+      finishTime.toFixed(3) + ' 秒';
+
   }
+
 }
+
+document.getElementById('calculate').addEventListener('click', calculate);
 
 function calculate(){
 
-  if(startTime===null||finishTime===null){
+  if (startTime === null || finishTime === null) {
     alert('スタートとタッチの両方を記録してください');
     return;
   }
 
-  const result=finishTime-startTime;
+  const result = finishTime - startTime;
 
-  if(result<0){
+  if (result < 0) {
     alert('時刻を確認してください');
     return;
   }
 
-  document.getElementById('result').textContent=
-    result.toFixed(3)+' 秒';
+  document.getElementById('result').textContent =
+    result.toFixed(3) + ' 秒';
+
 }
 
 
-// 動画の指定時刻への移動を安全に待つ
+// ========================
+// 安全な動画移動
+// ========================
+
 function seekTo(time){
 
-  return new Promise((resolve,reject)=>{
+  return new Promise((resolve, reject) => {
 
-    const target=Math.max(
+    const target = Math.max(
       0,
-      Math.min(time,Math.max(0,video.duration-0.01))
+      Math.min(time, Math.max(0, video.duration - 0.01))
     );
 
-    // すでに指定位置にいる場合
-    if(
+    if (
       !video.seeking &&
-      Math.abs(video.currentTime-target)<0.015
-    ){
-      setTimeout(resolve,100);
+      Math.abs(video.currentTime - target) < 0.015
+    ) {
+      setTimeout(resolve, 100);
       return;
     }
 
-    let finished=false;
+    let finished = false;
 
-    const cleanup=()=>{
+    const cleanup = () => {
       clearTimeout(timer);
-      video.removeEventListener('seeked',onSeeked);
-      video.removeEventListener('error',onError);
+      video.removeEventListener('seeked', onSeeked);
+      video.removeEventListener('error', onError);
     };
 
-    const done=()=>{
-      if(finished)return;
-      finished=true;
+    const done = () => {
+      if (finished) return;
+      finished = true;
       cleanup();
       resolve();
     };
 
-    const fail=()=>{
-      if(finished)return;
-      finished=true;
+    const fail = () => {
+      if (finished) return;
+      finished = true;
       cleanup();
       reject(new Error('動画の移動がタイムアウトしました'));
     };
 
-    const onSeeked=()=>{
-      setTimeout(()=>{
-        if(video.readyState>=2){
-          done();
-        }else{
-          fail();
-        }
-      },120);
+    const onSeeked = () => {
+      setTimeout(() => {
+        if (video.readyState >= 2) done();
+        else fail();
+      }, 120);
     };
 
-    const onError=()=>fail();
+    const onError = () => fail();
 
-    const timer=setTimeout(()=>{
-      if(
-        Math.abs(video.currentTime-target)<0.05 &&
-        video.readyState>=2
-      ){
-        done();
-      }else{
-        fail();
-      }
-    },10000);
+    const timer = setTimeout(fail, 10000);
 
-    video.addEventListener('seeked',onSeeked);
-    video.addEventListener('error',onError);
+    video.addEventListener('seeked', onSeeked);
+    video.addEventListener('error', onError);
 
-    try{
-      video.currentTime=target;
-    }catch(e){
+    try {
+      video.currentTime = target;
+    } catch (error) {
       fail();
     }
 
   });
+
 }
 
 
-// 動画の画像データが準備されるのを待つ
+// ========================
+// 動画フレーム準備
+// ========================
+
 async function waitForVideoFrame(){
 
-  if(video.readyState<2){
+  if (video.readyState < 2) {
 
-    await new Promise((resolve,reject)=>{
+    await new Promise((resolve, reject) => {
 
-      const timer=setTimeout(()=>{
+      const timer = setTimeout(() => {
         cleanup();
-        reject(new Error('画像データの読み込み待ちがタイムアウトしました'));
-      },5000);
+        reject(new Error('動画の読み込み待ちがタイムアウトしました'));
+      }, 5000);
 
-      const onReady=()=>{
+      const onReady = () => {
         cleanup();
         resolve();
       };
 
-      const onError=()=>{
+      const onError = () => {
         cleanup();
-        reject(new Error('動画データを読み込めません'));
+        reject(new Error('動画を読み込めません'));
       };
 
-      const cleanup=()=>{
+      const cleanup = () => {
         clearTimeout(timer);
-        video.removeEventListener('loadeddata',onReady);
-        video.removeEventListener('error',onError);
+        video.removeEventListener('loadeddata', onReady);
+        video.removeEventListener('error', onError);
       };
 
-      video.addEventListener('loadeddata',onReady,{once:true});
-      video.addEventListener('error',onError,{once:true});
+      video.addEventListener('loadeddata', onReady, {once:true});
+      video.addEventListener('error', onError, {once:true});
 
     });
+
   }
 
-  // iPhone Safariの描画準備を待つ
-  await new Promise(resolve=>setTimeout(resolve,120));
-
-  if(video.videoWidth===0 || video.videoHeight===0){
+  if (video.videoWidth === 0 || video.videoHeight === 0) {
     throw new Error('動画の画像サイズを取得できません');
   }
+
 }
 
 
+// ========================
 // 画像抽出
+// ========================
+
+document.getElementById('extract').addEventListener('click', extractFrames);
+
 async function extractFrames(){
 
-  if(
+  if (
     !video.src ||
     !Number.isFinite(video.duration) ||
-    video.duration<=0
-  ){
+    video.duration <= 0
+  ) {
     alert('先に動画を選んでください');
     return;
   }
 
-  if(video.readyState<1){
-    alert('動画の読み込みが完了するまで待ってください');
-    return;
-  }
+  const extractButton = document.getElementById('extract');
 
-  button.disabled=true;
+  extractButton.disabled = true;
   video.pause();
-  frames.innerHTML='';
+  frames.innerHTML = '';
 
-  const canvas=document.createElement('canvas');
-  const ctx=canvas.getContext('2d');
+  const canvas = document.createElement('canvas');
+  const imageContext = canvas.getContext('2d');
 
-  if(!ctx){
-    status.textContent='画像処理を開始できません。';
-    button.disabled=false;
-    return;
-  }
+  canvas.width = 320;
 
-  canvas.width=320;
-
-  canvas.height=Math.max(
+  canvas.height = Math.max(
     1,
-    Math.round(
-      320*video.videoHeight/video.videoWidth
-    )
+    Math.round(320 * video.videoHeight / video.videoWidth)
   );
 
-  const interval=0.5;
-  const maxFrames=80;
-
-  const count=Math.min(
-    Math.ceil(video.duration/interval),
-    maxFrames
+  const interval = 0.5;
+  const count = Math.min(
+    Math.ceil(video.duration / interval),
+    80
   );
 
-  const oldTime=video.currentTime;
+  const oldTime = video.currentTime;
 
-  let successCount=0;
+  let successCount = 0;
 
-  try{
+  try {
 
     await waitForVideoFrame();
 
-    for(let i=0;i<count;i++){
+    for (let i = 0; i < count; i++) {
 
-      const t=Math.min(
-        i*interval,
-        Math.max(0,video.duration-0.05)
+      const t = Math.min(
+        i * interval,
+        Math.max(0, video.duration - 0.05)
       );
 
-      status.textContent=
-        '画像を取り出しています：'+
-        (i+1)+' / '+count;
+      status.textContent =
+        '画像を取り出しています：' + (i + 1) + ' / ' + count;
 
       await seekTo(t);
-
       await waitForVideoFrame();
 
-      ctx.drawImage(
+      imageContext.drawImage(
         video,
         0,
         0,
@@ -434,69 +554,69 @@ async function extractFrames(){
         canvas.height
       );
 
-      const img=document.createElement('img');
+      const img = document.createElement('img');
 
-      img.src=canvas.toDataURL(
-        'image/jpeg',
-        0.65
-      );
+      img.src = canvas.toDataURL('image/jpeg', 0.65);
 
-      const item=document.createElement('div');
-      item.className='frame';
+      const item = document.createElement('div');
+      item.className = 'frame';
 
-      const label=document.createElement('div');
-      label.textContent=t.toFixed(1)+' 秒';
-      label.className='small';
+      const label = document.createElement('div');
+      label.textContent = t.toFixed(1) + ' 秒';
+      label.className = 'small';
 
       item.appendChild(img);
       item.appendChild(label);
 
-      item.onclick=()=>{
-        video.currentTime=t;
+      item.addEventListener('click', () => {
+        video.currentTime = t;
         video.pause();
-      };
+      });
 
       frames.appendChild(item);
 
       successCount++;
+
     }
 
-    status.textContent=
-      successCount+'枚の画像を取り出しました。';
+    status.textContent =
+      successCount + '枚の画像を取り出しました。';
 
-  }catch(e){
+  } catch (error) {
 
-    status.textContent=
-      '画像抽出が停止しました：'+
-      e.message+
-      '（'+successCount+'枚取得済み）';
+    status.textContent =
+      '画像抽出エラー：' + error.message;
 
-  }finally{
+  } finally {
 
-    try{
-      video.currentTime=oldTime;
-    }catch(e){}
+    try {
+      await seekTo(oldTime);
+    } catch (error) {}
 
-    button.disabled=false;
+    extractButton.disabled = false;
 
   }
 
 }
-// ===== AI選手検出 =====
 
-let aiModel = null;
-let selectedPlayer = null;
 
-const aiStatus = document.getElementById('aiStatus');
-const loadAIButton = document.getElementById('loadAI');
-const detectButton = document.getElementById('detectPlayers');
-const playerResults = document.getElementById('playerResults');
-
+// ========================
 // AIモデル読み込み
+// ========================
+
 loadAIButton.addEventListener('click', async () => {
 
+  if (aiModel) {
+    aiStatus.textContent = 'AIモデルは読み込み済みです。';
+    return;
+  }
+
   try {
-    aiStatus.textContent = 'AIモデルを読み込んでいます...';
+
+    loadAIButton.disabled = true;
+
+    aiStatus.textContent =
+      'AIモデルを読み込んでいます...';
 
     await tf.ready();
 
@@ -504,39 +624,141 @@ loadAIButton.addEventListener('click', async () => {
       base: 'lite_mobilenet_v2'
     });
 
-    aiStatus.textContent = 'AIモデルの準備ができました！';
+    aiStatus.textContent =
+      'AIモデルの準備ができました！';
+
     detectButton.disabled = false;
 
   } catch (error) {
-    aiStatus.textContent = '読み込みエラー：' + error.message;
+
+    aiStatus.textContent =
+      '読み込みエラー：' + error.message;
+
+    loadAIButton.disabled = false;
+
   }
 
 });
 
-// 選手検出
-detectButton.addEventListener('click', async () => {
+
+// ========================
+// 枠の表示
+// ========================
+
+function resizeOverlay(){
+
+  if (!video.videoWidth) return;
+
+  overlay.width = video.videoWidth;
+  overlay.height = video.videoHeight;
+
+  drawBoxes(lastPredictions);
+
+}
+
+function clearOverlay(){
+
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+}
+
+function drawBoxes(predictions){
+
+  if (!video.videoWidth) return;
+
+  if (
+    overlay.width !== video.videoWidth ||
+    overlay.height !== video.videoHeight
+  ) {
+    overlay.width = video.videoWidth;
+    overlay.height = video.videoHeight;
+  }
+
+  clearOverlay();
+
+  predictions.forEach(player => {
+
+    const b = player.bbox;
+
+    const isSelected =
+      player === selectedPlayer ||
+      player.isSelected === true;
+
+    ctx.lineWidth = Math.max(3, video.videoWidth / 250);
+
+    ctx.strokeStyle = isSelected ? '#00ff80' : '#55d6ff';
+
+    ctx.strokeRect(
+      b[0],
+      b[1],
+      b[2],
+      b[3]
+    );
+
+    ctx.font = 'bold 24px Arial';
+
+    ctx.fillStyle = isSelected ? '#00ff80' : '#55d6ff';
+
+    ctx.fillText(
+      isSelected ? 'TARGET' : 'PERSON',
+      b[0],
+      Math.max(25, b[1] - 8)
+    );
+
+  });
+
+}
+
+video.addEventListener('loadedmetadata', resizeOverlay);
+
+
+// ========================
+// AI選手検出
+// ========================
+
+detectButton.addEventListener('click', detectPlayers);
+
+async function detectPlayers(){
 
   if (!aiModel || !video.videoWidth) {
-    aiStatus.textContent = '先に動画とAIモデルを読み込んでください。';
+    aiStatus.textContent = '動画とAIモデルを準備してください。';
     return;
   }
 
+  if (detecting) return;
+
   try {
 
+    video.pause();
+
+    detecting = true;
     detectButton.disabled = true;
+
     aiStatus.textContent = '選手を検出しています...';
+
+    await waitForVideoFrame();
 
     const predictions = await aiModel.detect(video);
 
     const players = predictions.filter(
-      p => p.class === 'person' && p.score >= 0.35
+      p => p.class === 'person' && p.score >= 0.20
     );
+
+    lastPredictions = players;
+    selectedPlayer = null;
+    previousCenter = null;
 
     playerResults.innerHTML = '';
 
     if (players.length === 0) {
-      aiStatus.textContent = '選手を検出できませんでした。';
+
+      aiStatus.textContent =
+        '選手を検出できませんでした。';
+
+      drawBoxes([]);
+
       return;
+
     }
 
     players.forEach((player, index) => {
@@ -548,30 +770,38 @@ detectButton.addEventListener('click', async () => {
         '（検出信頼度 ' +
         Math.round(player.score * 100) + '%）';
 
-      button.style.display = 'block';
-      button.style.width = '100%';
+      button.addEventListener('click', () => {
 
-      button.onclick = () => {
+        stopTracking();
 
-      selectedPlayer = player;
+        selectedPlayer = player;
 
-previousCenter = {
-  x: player.bbox[0] + player.bbox[2] / 2,
-  y: player.bbox[1] + player.bbox[3] / 2
-};
+        previousCenter = {
+          x: player.bbox[0] + player.bbox[2] / 2,
+          y: player.bbox[1] + player.bbox[3] / 2
+        };
 
-        aiStatus.textContent =
-          '選手 ' + (index + 1) + ' を計測対象に選択しました。';
+        player.isSelected = true;
 
-        document.querySelectorAll('#playerResults button')
-          .forEach(b => b.style.background = '#168bd0');
+        playerResults.querySelectorAll('button').forEach(b => {
+          b.style.background = '#168bd0';
+        });
 
         button.style.background = '#159957';
-      };
+
+        drawBoxes(lastPredictions);
+
+        aiStatus.textContent =
+          '選手 ' + (index + 1) +
+          ' を計測対象に選択しました。動画を再生すると追跡します。';
+
+      });
 
       playerResults.appendChild(button);
 
     });
+
+    drawBoxes(players);
 
     aiStatus.textContent =
       players.length + '人の選手を検出しました。';
@@ -583,24 +813,32 @@ previousCenter = {
 
   } finally {
 
-    detectButton.disabled = false;
+    detecting = false;
+    detectButton.disabled = !aiModel;
 
   }
 
-});
-// ===== 選手の簡易追跡 =====
+}
 
-let trackingActive = false;
-let trackingTimer = null;
-let previousCenter = null;
 
-async function trackSelectedPlayer() {
+// ========================
+// 選手追跡
+// ========================
 
-  if (!trackingActive || !aiModel || video.paused) return;
+async function trackSelectedPlayer(){
+
+  if (
+    !trackingActive ||
+    !aiModel ||
+    video.paused ||
+    detecting
+  ) {
+    return;
+  }
+
+  detecting = true;
 
   try {
-
-    await waitForVideoFrame();
 
     const predictions = await aiModel.detect(video);
 
@@ -610,68 +848,75 @@ async function trackSelectedPlayer() {
 
     if (players.length > 0) {
 
-      let target = players[0];
+      let target = null;
       let minDistance = Infinity;
 
-      if (previousCenter) {
+      players.forEach(player => {
 
-        players.forEach(player => {
+        const x = player.bbox[0] + player.bbox[2] / 2;
+        const y = player.bbox[1] + player.bbox[3] / 2;
 
-          const x = player.bbox[0] + player.bbox[2] / 2;
-          const y = player.bbox[1] + player.bbox[3] / 2;
+        if (!previousCenter) {
+          return;
+        }
 
-          const distance = Math.hypot(
-            x - previousCenter.x,
-            y - previousCenter.y
-          );
+        const distance = Math.hypot(
+          x - previousCenter.x,
+          y - previousCenter.y
+        );
 
-          if (distance < minDistance) {
-            minDistance = distance;
-            target = player;
-          }
+        if (distance < minDistance) {
+          minDistance = distance;
+          target = player;
+        }
 
-        });
+      });
+
+      const diagonal = Math.hypot(
+        video.videoWidth,
+        video.videoHeight
+      );
+
+      // 大きく離れた検出対象への誤切り替えを抑える
+      if (target && minDistance < diagonal * 0.30) {
+
+        previousCenter = {
+          x: target.bbox[0] + target.bbox[2] / 2,
+          y: target.bbox[1] + target.bbox[3] / 2
+        };
+
+        target.isSelected = true;
+
+        lastPredictions = players;
+
+        lostCount = 0;
+
+        drawBoxes(players);
+
+        aiStatus.textContent =
+          '追跡中：選手を検出しています';
+
+      } else {
+
+        lostCount++;
+
+        drawBoxes(lastPredictions);
+
+        aiStatus.textContent =
+          '選手を見失いました。前回の位置を保持中 (' +
+          lostCount + ')';
 
       }
 
-      previousCenter = {
-        x: target.bbox[0] + target.bbox[2] / 2,
-        y: target.bbox[1] + target.bbox[3] / 2
-      };
-
-      aiStatus.textContent = '追跡中：選手を検出しています';
-
     } else {
 
-      aiStatus.textContent =
-        '選手を見失いました。前回の位置を保持しています。';
+      lostCount++;
 
-    }
-
-  } catch (error) {
-
-    aiStatus.textContent = '追跡エラー：' + error.message;
-
-  }
-
-  if (trackingActive) {
-    trackingTimer = setTimeout(trackSelectedPlayer, 700);
-  }
-
-}
-
-      previousCenter = {
-        x: target.bbox[0] + target.bbox[2] / 2,
-        y: target.bbox[1] + target.bbox[3] / 2
-      };
+      drawBoxes(lastPredictions);
 
       aiStatus.textContent =
-        '追跡中：選手を検出しています';
-
-    } else {
-
-      aiStatus.textContent =
-        '選手を見失いました。再検出中...';
+        '選手を見失いました。前回の位置を保持中 (' +
+        lostCount + ')';
 
     }
 
@@ -680,34 +925,54 @@ async function trackSelectedPlayer() {
     aiStatus.textContent =
       '追跡エラー：' + error.message;
 
-  }
+  } finally {
 
-  if (trackingActive) {
-    trackingTimer = setTimeout(trackSelectedPlayer, 500);
+    detecting = false;
+
+    if (trackingActive && !video.paused) {
+      trackingTimer = setTimeout(trackSelectedPlayer, 700);
+    }
+
   }
 
 }
 
-// 動画の再生・停止に連動
+
+// ========================
+// 再生・停止との連動
+// ========================
+
 video.addEventListener('play', () => {
 
-  aiStatus.textContent = '動画の再生を検知しました。';
-
-  if (selectedPlayer && aiModel) {
-    trackingActive = true;
-    trackSelectedPlayer();
-  } else {
-    aiStatus.textContent = '選手またはAIモデルが未選択です。';
+  if (!aiModel || !selectedPlayer) {
+    aiStatus.textContent =
+      'AIモデルを読み込み、選手を選択してください。';
+    return;
   }
+
+  trackingActive = true;
+
+  aiStatus.textContent = '追跡を開始します...';
+
+  trackSelectedPlayer();
 
 });
 
 video.addEventListener('pause', () => {
+  stopTracking();
+});
+
+function stopTracking(){
 
   trackingActive = false;
-  clearTimeout(trackingTimer);
 
-});
+  if (trackingTimer) {
+    clearTimeout(trackingTimer);
+    trackingTimer = null;
+  }
+
+}
+
 </script>
 
 </body>
