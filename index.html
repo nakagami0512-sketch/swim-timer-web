@@ -583,6 +583,98 @@ detectButton.addEventListener('click', async () => {
   }
 
 });
+// ===== 選手の簡易追跡 =====
+
+let trackingActive = false;
+let trackingTimer = null;
+let previousCenter = null;
+
+async function trackSelectedPlayer() {
+
+  if (!trackingActive || !aiModel || video.paused) return;
+
+  try {
+
+    const predictions = await aiModel.detect(video);
+
+    const players = predictions.filter(
+      p => p.class === 'person' && p.score >= 0.35
+    );
+
+    if (players.length > 0) {
+
+      let target = players[0];
+
+      if (previousCenter) {
+
+        let minDistance = Infinity;
+
+        players.forEach(player => {
+
+          const centerX =
+            player.bbox[0] + player.bbox[2] / 2;
+
+          const centerY =
+            player.bbox[1] + player.bbox[3] / 2;
+
+          const distance = Math.hypot(
+            centerX - previousCenter.x,
+            centerY - previousCenter.y
+          );
+
+          if (distance < minDistance) {
+            minDistance = distance;
+            target = player;
+          }
+
+        });
+
+      }
+
+      previousCenter = {
+        x: target.bbox[0] + target.bbox[2] / 2,
+        y: target.bbox[1] + target.bbox[3] / 2
+      };
+
+      aiStatus.textContent =
+        '追跡中：選手を検出しています';
+
+    } else {
+
+      aiStatus.textContent =
+        '選手を見失いました。再検出中...';
+
+    }
+
+  } catch (error) {
+
+    aiStatus.textContent =
+      '追跡エラー：' + error.message;
+
+  }
+
+  if (trackingActive) {
+    trackingTimer = setTimeout(trackSelectedPlayer, 500);
+  }
+
+}
+
+// 動画の再生・停止に連動
+video.addEventListener('play', () => {
+
+  if (selectedPlayer) {
+    trackingActive = true;
+    trackSelectedPlayer();
+  }
+
+});
+
+video.addEventListener('pause', () => {
+
+  trackingActive = false;
+  clearTimeout(trackingTimer);
+
+});
 </script>
 
 </body>
