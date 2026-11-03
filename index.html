@@ -65,7 +65,10 @@ video{
   font-weight:bold;
 }
 
-.small{font-size:13px;color:#b8cce0}
+.small{
+  font-size:13px;
+  color:#b8cce0;
+}
 
 .row{
   display:flex;
@@ -94,6 +97,10 @@ video{
   display:block;
   width:100%;
   text-align:left;
+}
+
+#aiStatus{
+  line-height:1.6;
 }
 
 </style>
@@ -161,12 +168,15 @@ video{
 AIモデルの準備ができていません。
 </p>
 
+<div class="row">
 <button id="loadAI">AIモデルを読み込む</button>
 <button id="detectPlayers" disabled>選手を検出する</button>
+</div>
 
 <p class="small">
-動画を一時停止して選手を検出し、計測対象を選んでください。
+動画を一時停止して選手を検出し、対象を選んでください。
 再生すると追跡を開始します。
+見失った場合は再検出候補を表示します。
 </p>
 
 <div id="playerResults"></div>
@@ -177,9 +187,9 @@ AIモデルの準備ができていません。
 
 <script>
 
-// ========================
+// ==================================
 // 基本設定
-// ========================
+// ==================================
 
 const video = document.getElementById('video');
 const fileInput = document.getElementById('file');
@@ -202,20 +212,39 @@ let startTime = null;
 let finishTime = null;
 
 let aiModel = null;
+
+// 現在追跡している選手
 let selectedPlayer = null;
+
+// 選手の位置
 let previousCenter = null;
 
+// 選手の見た目の特徴
+let selectedAppearance = null;
+
+// 追跡状態
 let trackingActive = false;
 let trackingTimer = null;
 let detecting = false;
-
 let lostCount = 0;
+
+// 現在検出している人物
 let lastPredictions = [];
 
+// 再検出候補
+let reacquireCandidates = [];
 
-// ========================
+// 見た目比較用キャンバス
+const appearanceCanvas = document.createElement('canvas');
+appearanceCanvas.width = 24;
+appearanceCanvas.height = 24;
+
+const appearanceCtx = appearanceCanvas.getContext('2d');
+
+
+// ==================================
 // 動画読み込み
-// ========================
+// ==================================
 
 fileInput.addEventListener('change', event => {
 
@@ -239,8 +268,14 @@ fileInput.addEventListener('change', event => {
 
   selectedPlayer = null;
   previousCenter = null;
+  selectedAppearance = null;
+
+  lostCount = 0;
+  lastPredictions = [];
+  reacquireCandidates = [];
 
   playerResults.innerHTML = '';
+
   clearOverlay();
 
   document.getElementById('start').textContent = '未設定';
@@ -260,7 +295,6 @@ fileInput.addEventListener('change', event => {
     status.textContent = '動画を読み込みました。';
 
     updateTime();
-
     resizeOverlay();
 
   }, {once:true});
@@ -275,9 +309,9 @@ fileInput.addEventListener('change', event => {
 });
 
 
-// ========================
+// ==================================
 // 時刻表示・コマ送り
-// ========================
+// ==================================
 
 function updateTime(){
 
@@ -314,9 +348,9 @@ function step(direction){
 }
 
 
-// ========================
+// ==================================
 // 手動タイム計測
-// ========================
+// ==================================
 
 document.getElementById('markStart').addEventListener('click', () => {
   mark('start');
@@ -373,9 +407,9 @@ function calculate(){
 }
 
 
-// ========================
-// 安全な動画移動
-// ========================
+// ==================================
+// 動画移動
+// ==================================
 
 function seekTo(time){
 
@@ -441,10 +475,6 @@ function seekTo(time){
 }
 
 
-// ========================
-// 動画フレーム準備
-// ========================
-
 async function waitForVideoFrame(){
 
   if (video.readyState < 2) {
@@ -486,9 +516,9 @@ async function waitForVideoFrame(){
 }
 
 
-// ========================
+// ==================================
 // 画像抽出
-// ========================
+// ==================================
 
 document.getElementById('extract').addEventListener('click', extractFrames);
 
@@ -520,6 +550,7 @@ async function extractFrames(){
   );
 
   const interval = 0.5;
+
   const count = Math.min(
     Math.ceil(video.duration / interval),
     80
@@ -600,9 +631,9 @@ async function extractFrames(){
 }
 
 
-// ========================
+// ==================================
 // AIモデル読み込み
-// ========================
+// ==================================
 
 loadAIButton.addEventListener('click', async () => {
 
@@ -641,9 +672,9 @@ loadAIButton.addEventListener('click', async () => {
 });
 
 
-// ========================
+// ==================================
 // 枠の表示
-// ========================
+// ==================================
 
 function resizeOverlay(){
 
@@ -680,20 +711,13 @@ function drawBoxes(predictions){
 
     const b = player.bbox;
 
-    const isSelected =
-      player === selectedPlayer ||
-      player.isSelected === true;
+    const isSelected = player.isSelected === true;
 
     ctx.lineWidth = Math.max(3, video.videoWidth / 250);
 
     ctx.strokeStyle = isSelected ? '#00ff80' : '#55d6ff';
 
-    ctx.strokeRect(
-      b[0],
-      b[1],
-      b[2],
-      b[3]
-    );
+    ctx.strokeRect(b[0], b[1], b[2], b[3]);
 
     ctx.font = 'bold 24px Arial';
 
@@ -710,18 +734,99 @@ function drawBoxes(predictions){
 }
 
 video.addEventListener('loadedmetadata', resizeOverlay);
+window.addEventListener('resize', resizeOverlay);
 
 
-// ========================
-// AI選手検出
-// ========================
+// ==================================
+// 選手の見た目を記録・比較
+// ==================================
+
+function getAppearanceDescriptor(bbox){
+
+  try {
+
+    const [x, y, w, h] = bbox;
+
+    const cropX = Math.max(0, x + w * 0.2);
+    const cropY = Math.max(0, y + h * 0.15);
+
+    const cropW = Math.min(
+      w * 0.6,
+      video.videoWidth - cropX
+    );
+
+    const cropH = Math.min(
+      h * 0.7,
+      video.videoHeight - cropY
+    );
+
+    if (cropW <= 0 || cropH <= 0) return null;
+
+    appearanceCtx.clearRect(0, 0, 24, 24);
+
+    appearanceCtx.drawImage(
+      video,
+      cropX, cropY, cropW, cropH,
+      0, 0, 24, 24
+    );
+
+    const pixels = appearanceCtx.getImageData(
+      0, 0, 24, 24
+    ).data;
+
+    const histogram = new Array(64).fill(0);
+
+    for (let i = 0; i < pixels.length; i += 4) {
+
+      const r = Math.floor(pixels[i] / 64);
+      const g = Math.floor(pixels[i + 1] / 64);
+      const b = Math.floor(pixels[i + 2] / 64);
+
+      const index = r * 16 + g * 4 + b;
+
+      histogram[index]++;
+
+    }
+
+    const total = histogram.reduce((a, b) => a + b, 0);
+
+    return histogram.map(value => value / total);
+
+  } catch (error) {
+
+    return null;
+
+  }
+
+}
+
+
+function compareAppearance(a, b){
+
+  if (!a || !b) return 0;
+
+  let similarity = 0;
+
+  for (let i = 0; i < a.length; i++) {
+    similarity += Math.min(a[i], b[i]);
+  }
+
+  return similarity;
+
+}
+
+
+// ==================================
+// 選手検出
+// ==================================
 
 detectButton.addEventListener('click', detectPlayers);
 
 async function detectPlayers(){
 
   if (!aiModel || !video.videoWidth) {
-    aiStatus.textContent = '動画とAIモデルを準備してください。';
+    aiStatus.textContent =
+      '動画とAIモデルを準備してください。';
     return;
   }
 
@@ -745,15 +850,18 @@ async function detectPlayers(){
     );
 
     lastPredictions = players;
+
     selectedPlayer = null;
     previousCenter = null;
+    selectedAppearance = null;
+    lostCount = 0;
 
     playerResults.innerHTML = '';
 
     if (players.length === 0) {
 
       aiStatus.textContent =
-        '選手を検出できませんでした。';
+        '選手を検出できませんでした。別の場面で試してください。';
 
       drawBoxes([]);
 
@@ -774,12 +882,21 @@ async function detectPlayers(){
 
         stopTracking();
 
+        lastPredictions.forEach(p => {
+          p.isSelected = false;
+        });
+
         selectedPlayer = player;
 
         previousCenter = {
           x: player.bbox[0] + player.bbox[2] / 2,
           y: player.bbox[1] + player.bbox[3] / 2
         };
+
+        selectedAppearance =
+          getAppearanceDescriptor(player.bbox);
+
+        lostCount = 0;
 
         player.isSelected = true;
 
@@ -793,7 +910,7 @@ async function detectPlayers(){
 
         aiStatus.textContent =
           '選手 ' + (index + 1) +
-          ' を計測対象に選択しました。動画を再生すると追跡します。';
+          ' を選択しました。動画を再生すると追跡します。';
 
       });
 
@@ -804,7 +921,7 @@ async function detectPlayers(){
     drawBoxes(players);
 
     aiStatus.textContent =
-      players.length + '人の選手を検出しました。';
+      players.length + '人の候補を検出しました。対象選手を選んでください。';
 
   } catch (error) {
 
@@ -821,9 +938,68 @@ async function detectPlayers(){
 }
 
 
-// ========================
+// ==================================
+// 再検出候補の表示
+// ==================================
+
+function showReacquireCandidates(candidates){
+
+  playerResults.innerHTML = '';
+
+  const heading = document.createElement('p');
+  heading.className = 'small';
+  heading.textContent =
+    '同じ選手か自動判定できません。正しい選手を選んでください。';
+
+  playerResults.appendChild(heading);
+
+  candidates.slice(0, 4).forEach((candidate, index) => {
+
+    const button = document.createElement('button');
+
+    button.textContent =
+      '再検出候補 ' + (index + 1) +
+      '（見た目の類似度 ' +
+      Math.round(candidate.similarity * 100) + '%）';
+
+    button.addEventListener('click', () => {
+
+      lastPredictions.forEach(p => {
+        p.isSelected = false;
+      });
+
+      selectedPlayer = candidate.player;
+
+      previousCenter = {
+        x: candidate.x,
+        y: candidate.y
+      };
+
+      selectedAppearance = candidate.appearance;
+
+      lostCount = 0;
+
+      candidate.player.isSelected = true;
+
+      drawBoxes(lastPredictions);
+
+      playerResults.innerHTML = '';
+
+      aiStatus.textContent =
+        '選手を再選択しました。追跡を続けます。';
+
+    });
+
+    playerResults.appendChild(button);
+
+  });
+
+}
+
+
+// ==================================
 // 選手追跡
-// ========================
+// ==================================
 
 async function trackSelectedPlayer(){
 
@@ -846,77 +1022,146 @@ async function trackSelectedPlayer(){
       p => p.class === 'person' && p.score >= 0.20
     );
 
-    if (players.length > 0) {
+    const diagonal = Math.hypot(
+      video.videoWidth,
+      video.videoHeight
+    );
 
-      let target = null;
-      let minDistance = Infinity;
+    const candidates = players.map(player => {
 
-      players.forEach(player => {
+      const x = player.bbox[0] + player.bbox[2] / 2;
+      const y = player.bbox[1] + player.bbox[3] / 2;
 
-        const x = player.bbox[0] + player.bbox[2] / 2;
-        const y = player.bbox[1] + player.bbox[3] / 2;
+      const distance = previousCenter
+        ? Math.hypot(
+            x - previousCenter.x,
+            y - previousCenter.y
+          )
+        : Infinity;
 
-        if (!previousCenter) {
-          return;
-        }
+      const appearance = getAppearanceDescriptor(player.bbox);
 
-        const distance = Math.hypot(
-          x - previousCenter.x,
-          y - previousCenter.y
-        );
-
-        if (distance < minDistance) {
-          minDistance = distance;
-          target = player;
-        }
-
-      });
-
-      const diagonal = Math.hypot(
-        video.videoWidth,
-        video.videoHeight
+      const similarity = compareAppearance(
+        selectedAppearance,
+        appearance
       );
 
-      // 大きく離れた検出対象への誤切り替えを抑える
-      if (target && minDistance < diagonal * 0.30) {
+      return {
+        player,
+        x,
+        y,
+        distance,
+        similarity,
+        appearance
+      };
 
-        previousCenter = {
-          x: target.bbox[0] + target.bbox[2] / 2,
-          y: target.bbox[1] + target.bbox[3] / 2
-        };
+    });
 
-        target.isSelected = true;
+    candidates.sort((a, b) => b.similarity - a.similarity);
 
-        lastPredictions = players;
+    let target = null;
 
-        lostCount = 0;
+    // 通常追跡：位置と見た目を合わせて判断
+    if (lostCount === 0) {
 
-        drawBoxes(players);
+      const nearby = candidates.filter(
+        c => c.distance < diagonal * 0.30
+      );
 
-        aiStatus.textContent =
-          '追跡中：選手を検出しています';
+      if (nearby.length > 0) {
+
+        nearby.sort((a, b) => {
+
+          const scoreA =
+            a.similarity * 0.65 +
+            (1 - a.distance / diagonal) * 0.35;
+
+          const scoreB =
+            b.similarity * 0.65 +
+            (1 - b.distance / diagonal) * 0.35;
+
+          return scoreB - scoreA;
+
+        });
+
+        target = nearby[0].player;
+
+      }
+
+    }
+
+    // 見失った後：見た目を優先して再検出
+    if (!target && candidates.length > 0) {
+
+      const best = candidates[0];
+      const second = candidates[1];
+
+      const clearlyBetter =
+        !second ||
+        best.similarity - second.similarity >= 0.12;
+
+      if (
+        best.similarity >= 0.55 &&
+        clearlyBetter
+      ) {
+
+        target = best.player;
 
       } else {
 
-        lostCount++;
+        reacquireCandidates = candidates;
 
-        drawBoxes(lastPredictions);
-
-        aiStatus.textContent =
-          '選手を見失いました。前回の位置を保持中 (' +
-          lostCount + ')';
+        showReacquireCandidates(candidates);
 
       }
+
+    }
+
+    if (target) {
+
+      lastPredictions.forEach(p => {
+        p.isSelected = false;
+      });
+
+      selectedPlayer = target;
+
+      previousCenter = {
+        x: target.bbox[0] + target.bbox[2] / 2,
+        y: target.bbox[1] + target.bbox[3] / 2
+      };
+
+      target.isSelected = true;
+
+      lastPredictions = players;
+
+      lostCount = 0;
+
+      playerResults.innerHTML = '';
+
+      drawBoxes(players);
+
+      aiStatus.textContent =
+        '追跡中：選手を検出しています。';
 
     } else {
 
       lostCount++;
 
-      drawBoxes(lastPredictions);
+      lastPredictions = players;
 
-      aiStatus.textContent =
-        '選手を見失いました。前回の位置を保持中 (' +
-        lostCount + ')';
+      drawBoxes(players);
+
+      if (players.length === 0) {
+
+        aiStatus.textContent =
+          '選手を見失っています。画面に戻るのを待っています。';
+
+      } else {
+
+        aiStatus.textContent =
+          '同じ選手か判断できません。候補から選んでください。';
+
+      }
 
     }
 
@@ -938,9 +1183,9 @@ async function trackSelectedPlayer(){
 }
 
 
-// ========================
+// ==================================
 // 再生・停止との連動
-// ========================
+// ==================================
 
 video.addEventListener('play', () => {
 
@@ -972,6 +1217,13 @@ function stopTracking(){
   }
 
 }
+
+
+// ==================================
+// 初期化
+// ==================================
+
+window.addEventListener('resize', resizeOverlay);
 
 </script>
 
