@@ -1,4 +1,5 @@
 
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -8,15 +9,17 @@
 <title>Swim Timer</title>
 <style>
 *{box-sizing:border-box}
-body{margin:0;background:#071b35;color:white;font-family:Arial,sans-serif;padding:20px}
+body{margin:0;background:#071b35;color:white;font-family:Arial,sans-serif;padding:18px}
 h1{text-align:center;color:#55d6ff}
 .card{background:#122b49;padding:16px;border-radius:14px;margin:14px 0}
-button{background:#168bd0;color:white;border:0;border-radius:9px;padding:13px;margin:4px;font-size:15px}
-input[type=number]{width:75px;padding:9px;border-radius:7px;border:0}
+button{background:#168bd0;color:white;border:0;border-radius:9px;padding:12px;margin:4px;font-size:15px}
 video{width:100%;background:#000;border-radius:10px}
-.time{font-size:27px;font-weight:bold;color:#55d6ff}
-.row{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
-.small{color:#b8cce0;font-size:13px}
+.time{font-size:25px;color:#55d6ff;font-weight:bold}
+.small{font-size:13px;color:#b8cce0}
+.row{display:flex;flex-wrap:wrap;gap:6px}
+#frames{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.frame{background:#071b35;padding:6px;border-radius:8px}
+.frame img{width:100%;border-radius:5px}
 </style>
 </head>
 <body>
@@ -25,7 +28,6 @@ video{width:100%;background:#000;border-radius:10px}
 <div class="card">
 <h3>① 動画を選択</h3>
 <input id="file" type="file" accept="video/*">
-<p class="small">iPhoneの写真から水泳動画を選んでください。</p>
 </div>
 
 <div class="card">
@@ -44,34 +46,36 @@ video{width:100%;background:#000;border-radius:10px}
 <button onclick="mark('finish')">タッチを記録</button>
 <p>スタート：<span id="start">未設定</span></p>
 <p>タッチ：<span id="finish">未設定</span></p>
+<button onclick="calculate()">タイムを計算</button>
+<p class="time" id="result">--.---</p>
 </div>
 
 <div class="card">
-<h3>④ タイム計算</h3>
-<button onclick="calculate()">タイムを計算</button>
-<p class="time" id="result">--.---</p>
-<button onclick="resetAll()">リセット</button>
+<h3>④ 動画から画像を取り出す</h3>
+<p class="small">0.5秒ごとの画像をiPhone内で取り出します。動画は外部に送信しません。</p>
+<button id="extract" onclick="extractFrames()">画像を取り出す</button>
+<p id="status" class="small">動画を選択してください。</p>
+<div id="frames"></div>
 </div>
 
 <script>
 const video=document.getElementById('video');
-let startTime=null;
-let finishTime=null;
+let startTime=null,finishTime=null,videoUrl=null;
 let frameRate=30;
-let videoUrl=null;
 
-document.getElementById('file').addEventListener('change',e=>{
+document.getElementById('file').onchange=e=>{
  const file=e.target.files[0];
  if(!file)return;
  if(videoUrl)URL.revokeObjectURL(videoUrl);
  videoUrl=URL.createObjectURL(file);
  video.src=videoUrl;
- startTime=null;
- finishTime=null;
+ startTime=null;finishTime=null;
  document.getElementById('start').textContent='未設定';
  document.getElementById('finish').textContent='未設定';
  document.getElementById('result').textContent='--.---';
-});
+ document.getElementById('frames').innerHTML='';
+ document.getElementById('status').textContent='動画を読み込みました。';
+};
 
 function update(){
  document.getElementById('current').textContent=video.currentTime.toFixed(3);
@@ -99,20 +103,64 @@ function mark(type){
 
 function calculate(){
  if(startTime===null||finishTime===null){
- alert('スタートとタッチの両方を記録してください');
- return;
+ alert('スタートとタッチの両方を記録してください');return;
  }
  const result=finishTime-startTime;
- if(result<0){alert('タッチがスタートより前になっています');return;}
+ if(result<0){alert('時刻を確認してください');return;}
  document.getElementById('result').textContent=result.toFixed(3)+' 秒';
 }
 
-function resetAll(){
- startTime=null;
- finishTime=null;
- document.getElementById('start').textContent='未設定';
- document.getElementById('finish').textContent='未設定';
- document.getElementById('result').textContent='--.---';
+function seekTo(time){
+ return new Promise(resolve=>{
+  const done=()=>{video.removeEventListener('seeked',done);resolve();};
+  video.addEventListener('seeked',done);
+  video.currentTime=time;
+ });
+}
+
+async function extractFrames(){
+ if(!video.src||!Number.isFinite(video.duration)){
+  alert('先に動画を選んでください');return;
+ }
+ const button=document.getElementById('extract');
+ const frames=document.getElementById('frames');
+ const status=document.getElementById('status');
+ button.disabled=true;
+ video.pause();
+ frames.innerHTML='';
+ const canvas=document.createElement('canvas');
+ const ctx=canvas.getContext('2d');
+ canvas.width=320;
+ canvas.height=Math.round(320*video.videoHeight/video.videoWidth);
+ const interval=0.5;
+ const maxFrames=80;
+ const count=Math.min(Math.ceil(video.duration/interval),maxFrames);
+ const oldTime=video.currentTime;
+ try{
+  for(let i=0;i<count;i++){
+   const t=Math.min(i*interval,Math.max(0,video.duration-0.05));
+   status.textContent='画像を取り出しています：'+(i+1)+' / '+count;
+   await seekTo(t);
+   ctx.drawImage(video,0,0,canvas.width,canvas.height);
+   const img=document.createElement('img');
+   img.src=canvas.toDataURL('image/jpeg',0.65);
+   const item=document.createElement('div');
+   item.className='frame';
+   const label=document.createElement('div');
+   label.textContent=t.toFixed(1)+' 秒';
+   label.className='small';
+   item.appendChild(img);
+   item.appendChild(label);
+   item.onclick=()=>{video.currentTime=t;video.pause();};
+   frames.appendChild(item);
+  }
+  status.textContent=count+'枚の画像を取り出しました。画像をタップするとその時刻に移動します。';
+ }catch(e){
+  status.textContent='画像の取り出しに失敗しました。別の動画で試してください。';
+ }finally{
+  video.currentTime=oldTime;
+  button.disabled=false;
+ }
 }
 </script>
 </body>
