@@ -553,7 +553,12 @@ detectButton.addEventListener('click', async () => {
 
       button.onclick = () => {
 
-        selectedPlayer = player;
+      selectedPlayer = player;
+
+previousCenter = {
+  x: player.bbox[0] + player.bbox[2] / 2,
+  y: player.bbox[1] + player.bbox[3] / 2
+};
 
         aiStatus.textContent =
           '選手 ' + (index + 1) + ' を計測対象に選択しました。';
@@ -595,31 +600,29 @@ async function trackSelectedPlayer() {
 
   try {
 
+    await waitForVideoFrame();
+
     const predictions = await aiModel.detect(video);
 
     const players = predictions.filter(
-      p => p.class === 'person' && p.score >= 0.35
+      p => p.class === 'person' && p.score >= 0.20
     );
 
     if (players.length > 0) {
 
       let target = players[0];
+      let minDistance = Infinity;
 
       if (previousCenter) {
 
-        let minDistance = Infinity;
-
         players.forEach(player => {
 
-          const centerX =
-            player.bbox[0] + player.bbox[2] / 2;
-
-          const centerY =
-            player.bbox[1] + player.bbox[3] / 2;
+          const x = player.bbox[0] + player.bbox[2] / 2;
+          const y = player.bbox[1] + player.bbox[3] / 2;
 
           const distance = Math.hypot(
-            centerX - previousCenter.x,
-            centerY - previousCenter.y
+            x - previousCenter.x,
+            y - previousCenter.y
           );
 
           if (distance < minDistance) {
@@ -630,6 +633,32 @@ async function trackSelectedPlayer() {
         });
 
       }
+
+      previousCenter = {
+        x: target.bbox[0] + target.bbox[2] / 2,
+        y: target.bbox[1] + target.bbox[3] / 2
+      };
+
+      aiStatus.textContent = '追跡中：選手を検出しています';
+
+    } else {
+
+      aiStatus.textContent =
+        '選手を見失いました。前回の位置を保持しています。';
+
+    }
+
+  } catch (error) {
+
+    aiStatus.textContent = '追跡エラー：' + error.message;
+
+  }
+
+  if (trackingActive) {
+    trackingTimer = setTimeout(trackSelectedPlayer, 700);
+  }
+
+}
 
       previousCenter = {
         x: target.bbox[0] + target.bbox[2] / 2,
