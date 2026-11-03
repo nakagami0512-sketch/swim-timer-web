@@ -72,6 +72,19 @@ video{
 <h3>② 動画を確認</h3>
 <video id="video" controls playsinline preload="auto"></video>
 
+<div class="card">
+<h3>⑤ AI選手検出</h3>
+
+<p id="aiStatus" class="small">
+AIモデルの準備ができていません。
+</p>
+
+<button id="loadAI">AIモデルを読み込む</button>
+<button id="detectPlayers" disabled>選手を検出する</button>
+
+<div id="playerResults"></div>
+</div>  
+
 <div class="row">
 <button onclick="step(-1)">◀ 1コマ戻る</button>
 <button onclick="step(1)">1コマ進む ▶</button>
@@ -110,6 +123,9 @@ video{
 <p id="status" class="small">動画を選択してください。</p>
 <div id="frames"></div>
 </div>
+  
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3"></script>
 
 <script>
 
@@ -466,7 +482,107 @@ async function extractFrames(){
   }
 
 }
+// ===== AI選手検出 =====
 
+let aiModel = null;
+let selectedPlayer = null;
+
+const aiStatus = document.getElementById('aiStatus');
+const loadAIButton = document.getElementById('loadAI');
+const detectButton = document.getElementById('detectPlayers');
+const playerResults = document.getElementById('playerResults');
+
+// AIモデル読み込み
+loadAIButton.addEventListener('click', async () => {
+
+  try {
+    aiStatus.textContent = 'AIモデルを読み込んでいます...';
+
+    await tf.ready();
+
+    aiModel = await cocoSsd.load({
+      base: 'lite_mobilenet_v2'
+    });
+
+    aiStatus.textContent = 'AIモデルの準備ができました！';
+    detectButton.disabled = false;
+
+  } catch (error) {
+    aiStatus.textContent = '読み込みエラー：' + error.message;
+  }
+
+});
+
+// 選手検出
+detectButton.addEventListener('click', async () => {
+
+  if (!aiModel || !video.videoWidth) {
+    aiStatus.textContent = '先に動画とAIモデルを読み込んでください。';
+    return;
+  }
+
+  try {
+
+    detectButton.disabled = true;
+    aiStatus.textContent = '選手を検出しています...';
+
+    const predictions = await aiModel.detect(video);
+
+    const players = predictions.filter(
+      p => p.class === 'person' && p.score >= 0.35
+    );
+
+    playerResults.innerHTML = '';
+
+    if (players.length === 0) {
+      aiStatus.textContent = '選手を検出できませんでした。';
+      return;
+    }
+
+    players.forEach((player, index) => {
+
+      const button = document.createElement('button');
+
+      button.textContent =
+        '選手 ' + (index + 1) +
+        '（検出信頼度 ' +
+        Math.round(player.score * 100) + '%）';
+
+      button.style.display = 'block';
+      button.style.width = '100%';
+
+      button.onclick = () => {
+
+        selectedPlayer = player;
+
+        aiStatus.textContent =
+          '選手 ' + (index + 1) + ' を計測対象に選択しました。';
+
+        document.querySelectorAll('#playerResults button')
+          .forEach(b => b.style.background = '#168bd0');
+
+        button.style.background = '#159957';
+      };
+
+      playerResults.appendChild(button);
+
+    });
+
+    aiStatus.textContent =
+      players.length + '人の選手を検出しました。';
+
+  } catch (error) {
+
+    aiStatus.textContent =
+      '検出エラー：' + error.message;
+
+  } finally {
+
+    detectButton.disabled = false;
+
+  }
+
+});
 </script>
 
 </body>
