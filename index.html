@@ -662,9 +662,13 @@ async function trackSelectedPlayer() {
 // 動画の再生・停止に連動
 video.addEventListener('play', () => {
 
-  if (selectedPlayer) {
+  aiStatus.textContent = '動画の再生を検知しました。';
+
+  if (selectedPlayer && aiModel) {
     trackingActive = true;
     trackSelectedPlayer();
+  } else {
+    aiStatus.textContent = '選手またはAIモデルが未選択です。';
   }
 
 });
