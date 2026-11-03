@@ -1,5 +1,4 @@
 
-
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -7,22 +6,61 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#071b35">
 <title>Swim Timer</title>
+
 <style>
 *{box-sizing:border-box}
-body{margin:0;background:#071b35;color:white;font-family:Arial,sans-serif;padding:18px}
+body{
+  margin:0;
+  background:#071b35;
+  color:white;
+  font-family:Arial,sans-serif;
+  padding:18px;
+}
 h1{text-align:center;color:#55d6ff}
-.card{background:#122b49;padding:16px;border-radius:14px;margin:14px 0}
-button{background:#168bd0;color:white;border:0;border-radius:9px;padding:12px;margin:4px;font-size:15px}
-video{width:100%;background:#000;border-radius:10px}
-.time{font-size:25px;color:#55d6ff;font-weight:bold}
+.card{
+  background:#122b49;
+  padding:16px;
+  border-radius:14px;
+  margin:14px 0;
+}
+button{
+  background:#168bd0;
+  color:white;
+  border:0;
+  border-radius:9px;
+  padding:12px;
+  margin:4px;
+  font-size:15px;
+}
+button:disabled{opacity:.5}
+video{
+  width:100%;
+  background:#000;
+  border-radius:10px;
+}
+.time{
+  font-size:25px;
+  color:#55d6ff;
+  font-weight:bold;
+}
 .small{font-size:13px;color:#b8cce0}
 .row{display:flex;flex-wrap:wrap;gap:6px}
-#frames{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
-.frame{background:#071b35;padding:6px;border-radius:8px}
+#frames{
+  display:grid;
+  grid-template-columns:repeat(2,1fr);
+  gap:8px;
+}
+.frame{
+  background:#071b35;
+  padding:6px;
+  border-radius:8px;
+}
 .frame img{width:100%;border-radius:5px}
 </style>
 </head>
+
 <body>
+
 <h1>SWIM TIMER</h1>
 
 <div class="card">
@@ -32,136 +70,404 @@ video{width:100%;background:#000;border-radius:10px}
 
 <div class="card">
 <h3>② 動画を確認</h3>
-<video id="video" controls playsinline></video>
+<video id="video" controls playsinline preload="auto"></video>
+
 <div class="row">
 <button onclick="step(-1)">◀ 1コマ戻る</button>
 <button onclick="step(1)">1コマ進む ▶</button>
 </div>
-<p>現在時刻：<span id="current" class="time">0.000</span> 秒</p>
+
+<p>現在時刻：
+<span id="current" class="time">0.000</span> 秒
+</p>
 </div>
 
 <div class="card">
 <h3>③ スタート・タッチを記録</h3>
+
 <button onclick="mark('start')">スタートを記録</button>
 <button onclick="mark('finish')">タッチを記録</button>
+
 <p>スタート：<span id="start">未設定</span></p>
 <p>タッチ：<span id="finish">未設定</span></p>
+
 <button onclick="calculate()">タイムを計算</button>
 <p class="time" id="result">--.---</p>
 </div>
 
 <div class="card">
 <h3>④ 動画から画像を取り出す</h3>
-<p class="small">0.5秒ごとの画像をiPhone内で取り出します。動画は外部に送信しません。</p>
-<button id="extract" onclick="extractFrames()">画像を取り出す</button>
+
+<p class="small">
+0.5秒ごとの画像をiPhone内で取り出します。
+動画は外部に送信しません。
+</p>
+
+<button id="extract" onclick="extractFrames()">
+画像を取り出す
+</button>
+
 <p id="status" class="small">動画を選択してください。</p>
 <div id="frames"></div>
 </div>
 
 <script>
+
 const video=document.getElementById('video');
-let startTime=null,finishTime=null,videoUrl=null;
+
+let startTime=null;
+let finishTime=null;
+let videoUrl=null;
 let frameRate=30;
 
-document.getElementById('file').onchange=e=>{
- const file=e.target.files[0];
- if(!file)return;
- if(videoUrl)URL.revokeObjectURL(videoUrl);
- videoUrl=URL.createObjectURL(file);
- video.src=videoUrl;
- startTime=null;finishTime=null;
- document.getElementById('start').textContent='未設定';
- document.getElementById('finish').textContent='未設定';
- document.getElementById('result').textContent='--.---';
- document.getElementById('frames').innerHTML='';
- document.getElementById('status').textContent='動画を読み込みました。';
-};
+const fileInput=document.getElementById('file');
+const frames=document.getElementById('frames');
+const status=document.getElementById('status');
+const button=document.getElementById('extract');
+
+fileInput.addEventListener('change',e=>{
+
+  const file=e.target.files[0];
+  if(!file)return;
+
+  if(videoUrl){
+    URL.revokeObjectURL(videoUrl);
+  }
+
+  videoUrl=URL.createObjectURL(file);
+
+  video.src=videoUrl;
+  video.load();
+
+  startTime=null;
+  finishTime=null;
+
+  document.getElementById('start').textContent='未設定';
+  document.getElementById('finish').textContent='未設定';
+  document.getElementById('result').textContent='--.---';
+
+  frames.innerHTML='';
+  status.textContent='動画を読み込んでいます...';
+
+  video.addEventListener('loadedmetadata',()=>{
+    status.textContent='動画を読み込みました。';
+    update();
+  },{once:true});
+
+  video.addEventListener('error',()=>{
+    status.textContent='動画の読み込みに失敗しました。';
+  },{once:true});
+
+});
 
 function update(){
- document.getElementById('current').textContent=video.currentTime.toFixed(3);
+  document.getElementById('current').textContent=
+    video.currentTime.toFixed(3);
 }
+
 video.addEventListener('timeupdate',update);
 video.addEventListener('seeked',update);
 
 function step(direction){
- if(!video.src)return;
- video.pause();
- video.currentTime=Math.max(0,Math.min(video.duration||0,
- video.currentTime+direction/frameRate));
+
+  if(!video.src)return;
+
+  video.pause();
+
+  video.currentTime=Math.max(
+    0,
+    Math.min(
+      video.duration||0,
+      video.currentTime+direction/frameRate
+    )
+  );
 }
 
 function mark(type){
- if(!video.src){alert('先に動画を選んでください');return;}
- if(type==='start'){
- startTime=video.currentTime;
- document.getElementById('start').textContent=startTime.toFixed(3)+' 秒';
- }else{
- finishTime=video.currentTime;
- document.getElementById('finish').textContent=finishTime.toFixed(3)+' 秒';
- }
+
+  if(!video.src){
+    alert('先に動画を選んでください');
+    return;
+  }
+
+  if(type==='start'){
+    startTime=video.currentTime;
+    document.getElementById('start').textContent=
+      startTime.toFixed(3)+' 秒';
+  }else{
+    finishTime=video.currentTime;
+    document.getElementById('finish').textContent=
+      finishTime.toFixed(3)+' 秒';
+  }
 }
 
 function calculate(){
- if(startTime===null||finishTime===null){
- alert('スタートとタッチの両方を記録してください');return;
- }
- const result=finishTime-startTime;
- if(result<0){alert('時刻を確認してください');return;}
- document.getElementById('result').textContent=result.toFixed(3)+' 秒';
-}
 
-function seekTo(time){
- return new Promise(resolve=>{
-  const done=()=>{video.removeEventListener('seeked',done);resolve();};
-  video.addEventListener('seeked',done);
-  video.currentTime=time;
- });
-}
-
-async function extractFrames(){
- if(!video.src||!Number.isFinite(video.duration)){
-  alert('先に動画を選んでください');return;
- }
- const button=document.getElementById('extract');
- const frames=document.getElementById('frames');
- const status=document.getElementById('status');
- button.disabled=true;
- video.pause();
- frames.innerHTML='';
- const canvas=document.createElement('canvas');
- const ctx=canvas.getContext('2d');
- canvas.width=320;
- canvas.height=Math.round(320*video.videoHeight/video.videoWidth);
- const interval=0.5;
- const maxFrames=80;
- const count=Math.min(Math.ceil(video.duration/interval),maxFrames);
- const oldTime=video.currentTime;
- try{
-  for(let i=0;i<count;i++){
-   const t=Math.min(i*interval,Math.max(0,video.duration-0.05));
-   status.textContent='画像を取り出しています：'+(i+1)+' / '+count;
-   await seekTo(t);
-   ctx.drawImage(video,0,0,canvas.width,canvas.height);
-   const img=document.createElement('img');
-   img.src=canvas.toDataURL('image/jpeg',0.65);
-   const item=document.createElement('div');
-   item.className='frame';
-   const label=document.createElement('div');
-   label.textContent=t.toFixed(1)+' 秒';
-   label.className='small';
-   item.appendChild(img);
-   item.appendChild(label);
-   item.onclick=()=>{video.currentTime=t;video.pause();};
-   frames.appendChild(item);
+  if(startTime===null||finishTime===null){
+    alert('スタートとタッチの両方を記録してください');
+    return;
   }
-  status.textContent=count+'枚の画像を取り出しました。画像をタップするとその時刻に移動します。';
- }catch(e){
-  status.textContent='画像の取り出しに失敗しました。別の動画で試してください。';
- }finally{
-  video.currentTime=oldTime;
-  button.disabled=false;
- }
+
+  const result=finishTime-startTime;
+
+  if(result<0){
+    alert('時刻を確認してください');
+    return;
+  }
+
+  document.getElementById('result').textContent=
+    result.toFixed(3)+' 秒';
 }
+
+
+// 動画の指定時刻への移動を安全に待つ
+function seekTo(time){
+
+  return new Promise((resolve,reject)=>{
+
+    const target=Math.max(
+      0,
+      Math.min(time,Math.max(0,video.duration-0.01))
+    );
+
+    // すでに指定位置にいる場合
+    if(
+      !video.seeking &&
+      Math.abs(video.currentTime-target)<0.015
+    ){
+      setTimeout(resolve,100);
+      return;
+    }
+
+    let finished=false;
+
+    const cleanup=()=>{
+      clearTimeout(timer);
+      video.removeEventListener('seeked',onSeeked);
+      video.removeEventListener('error',onError);
+    };
+
+    const done=()=>{
+      if(finished)return;
+      finished=true;
+      cleanup();
+      resolve();
+    };
+
+    const fail=()=>{
+      if(finished)return;
+      finished=true;
+      cleanup();
+      reject(new Error('動画の移動がタイムアウトしました'));
+    };
+
+    const onSeeked=()=>{
+      setTimeout(()=>{
+        if(video.readyState>=2){
+          done();
+        }else{
+          fail();
+        }
+      },120);
+    };
+
+    const onError=()=>fail();
+
+    const timer=setTimeout(()=>{
+      if(
+        Math.abs(video.currentTime-target)<0.05 &&
+        video.readyState>=2
+      ){
+        done();
+      }else{
+        fail();
+      }
+    },10000);
+
+    video.addEventListener('seeked',onSeeked);
+    video.addEventListener('error',onError);
+
+    try{
+      video.currentTime=target;
+    }catch(e){
+      fail();
+    }
+
+  });
+}
+
+
+// 動画の画像データが準備されるのを待つ
+async function waitForVideoFrame(){
+
+  if(video.readyState<2){
+
+    await new Promise((resolve,reject)=>{
+
+      const timer=setTimeout(()=>{
+        cleanup();
+        reject(new Error('画像データの読み込み待ちがタイムアウトしました'));
+      },5000);
+
+      const onReady=()=>{
+        cleanup();
+        resolve();
+      };
+
+      const onError=()=>{
+        cleanup();
+        reject(new Error('動画データを読み込めません'));
+      };
+
+      const cleanup=()=>{
+        clearTimeout(timer);
+        video.removeEventListener('loadeddata',onReady);
+        video.removeEventListener('error',onError);
+      };
+
+      video.addEventListener('loadeddata',onReady,{once:true});
+      video.addEventListener('error',onError,{once:true});
+
+    });
+  }
+
+  // iPhone Safariの描画準備を待つ
+  await new Promise(resolve=>setTimeout(resolve,120));
+
+  if(video.videoWidth===0 || video.videoHeight===0){
+    throw new Error('動画の画像サイズを取得できません');
+  }
+}
+
+
+// 画像抽出
+async function extractFrames(){
+
+  if(
+    !video.src ||
+    !Number.isFinite(video.duration) ||
+    video.duration<=0
+  ){
+    alert('先に動画を選んでください');
+    return;
+  }
+
+  if(video.readyState<1){
+    alert('動画の読み込みが完了するまで待ってください');
+    return;
+  }
+
+  button.disabled=true;
+  video.pause();
+  frames.innerHTML='';
+
+  const canvas=document.createElement('canvas');
+  const ctx=canvas.getContext('2d');
+
+  if(!ctx){
+    status.textContent='画像処理を開始できません。';
+    button.disabled=false;
+    return;
+  }
+
+  canvas.width=320;
+
+  canvas.height=Math.max(
+    1,
+    Math.round(
+      320*video.videoHeight/video.videoWidth
+    )
+  );
+
+  const interval=0.5;
+  const maxFrames=80;
+
+  const count=Math.min(
+    Math.ceil(video.duration/interval),
+    maxFrames
+  );
+
+  const oldTime=video.currentTime;
+
+  let successCount=0;
+
+  try{
+
+    await waitForVideoFrame();
+
+    for(let i=0;i<count;i++){
+
+      const t=Math.min(
+        i*interval,
+        Math.max(0,video.duration-0.05)
+      );
+
+      status.textContent=
+        '画像を取り出しています：'+
+        (i+1)+' / '+count;
+
+      await seekTo(t);
+
+      await waitForVideoFrame();
+
+      ctx.drawImage(
+        video,
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
+
+      const img=document.createElement('img');
+
+      img.src=canvas.toDataURL(
+        'image/jpeg',
+        0.65
+      );
+
+      const item=document.createElement('div');
+      item.className='frame';
+
+      const label=document.createElement('div');
+      label.textContent=t.toFixed(1)+' 秒';
+      label.className='small';
+
+      item.appendChild(img);
+      item.appendChild(label);
+
+      item.onclick=()=>{
+        video.currentTime=t;
+        video.pause();
+      };
+
+      frames.appendChild(item);
+
+      successCount++;
+    }
+
+    status.textContent=
+      successCount+'枚の画像を取り出しました。';
+
+  }catch(e){
+
+    status.textContent=
+      '画像抽出が停止しました：'+
+      e.message+
+      '（'+successCount+'枚取得済み）';
+
+  }finally{
+
+    try{
+      video.currentTime=oldTime;
+    }catch(e){}
+
+    button.disabled=false;
+
+  }
+
+}
+
 </script>
+
 </body>
 </html>
