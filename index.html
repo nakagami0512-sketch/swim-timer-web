@@ -1,0 +1,119 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#071b35">
+<title>Swim Timer</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#071b35;color:white;font-family:Arial,sans-serif;padding:20px}
+h1{text-align:center;color:#55d6ff}
+.card{background:#122b49;padding:16px;border-radius:14px;margin:14px 0}
+button{background:#168bd0;color:white;border:0;border-radius:9px;padding:13px;margin:4px;font-size:15px}
+input[type=number]{width:75px;padding:9px;border-radius:7px;border:0}
+video{width:100%;background:#000;border-radius:10px}
+.time{font-size:27px;font-weight:bold;color:#55d6ff}
+.row{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.small{color:#b8cce0;font-size:13px}
+</style>
+</head>
+<body>
+<h1>SWIM TIMER</h1>
+
+<div class="card">
+<h3>① 動画を選択</h3>
+<input id="file" type="file" accept="video/*">
+<p class="small">iPhoneの写真から水泳動画を選んでください。</p>
+</div>
+
+<div class="card">
+<h3>② 動画を確認</h3>
+<video id="video" controls playsinline></video>
+<div class="row">
+<button onclick="step(-1)">◀ 1コマ戻る</button>
+<button onclick="step(1)">1コマ進む ▶</button>
+</div>
+<p>現在時刻：<span id="current" class="time">0.000</span> 秒</p>
+</div>
+
+<div class="card">
+<h3>③ スタート・タッチを記録</h3>
+<button onclick="mark('start')">スタートを記録</button>
+<button onclick="mark('finish')">タッチを記録</button>
+<p>スタート：<span id="start">未設定</span></p>
+<p>タッチ：<span id="finish">未設定</span></p>
+</div>
+
+<div class="card">
+<h3>④ タイム計算</h3>
+<button onclick="calculate()">タイムを計算</button>
+<p class="time" id="result">--.---</p>
+<button onclick="resetAll()">リセット</button>
+</div>
+
+<script>
+const video=document.getElementById('video');
+let startTime=null;
+let finishTime=null;
+let frameRate=30;
+let videoUrl=null;
+
+document.getElementById('file').addEventListener('change',e=>{
+ const file=e.target.files[0];
+ if(!file)return;
+ if(videoUrl)URL.revokeObjectURL(videoUrl);
+ videoUrl=URL.createObjectURL(file);
+ video.src=videoUrl;
+ startTime=null;
+ finishTime=null;
+ document.getElementById('start').textContent='未設定';
+ document.getElementById('finish').textContent='未設定';
+ document.getElementById('result').textContent='--.---';
+});
+
+function update(){
+ document.getElementById('current').textContent=video.currentTime.toFixed(3);
+}
+video.addEventListener('timeupdate',update);
+video.addEventListener('seeked',update);
+
+function step(direction){
+ if(!video.src)return;
+ video.pause();
+ video.currentTime=Math.max(0,Math.min(video.duration||0,
+ video.currentTime+direction/frameRate));
+}
+
+function mark(type){
+ if(!video.src){alert('先に動画を選んでください');return;}
+ if(type==='start'){
+ startTime=video.currentTime;
+ document.getElementById('start').textContent=startTime.toFixed(3)+' 秒';
+ }else{
+ finishTime=video.currentTime;
+ document.getElementById('finish').textContent=finishTime.toFixed(3)+' 秒';
+ }
+}
+
+function calculate(){
+ if(startTime===null||finishTime===null){
+ alert('スタートとタッチの両方を記録してください');
+ return;
+ }
+ const result=finishTime-startTime;
+ if(result<0){alert('タッチがスタートより前になっています');return;}
+ document.getElementById('result').textContent=result.toFixed(3)+' 秒';
+}
+
+function resetAll(){
+ startTime=null;
+ finishTime=null;
+ document.getElementById('start').textContent='未設定';
+ document.getElementById('finish').textContent='未設定';
+ document.getElementById('result').textContent='--.---';
+}
+</script>
+</body>
+</html>
